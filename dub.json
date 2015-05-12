@@ -4,5 +4,5 @@
 	"license": "GPL-2.0",
 	"dependencies": {
 	},
-	"targetType": "executable",
+	"targetType": "library",
 }
