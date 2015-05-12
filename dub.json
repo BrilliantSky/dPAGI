@@ -1,0 +1,8 @@
+{
+	"name": "dPAGI",
+	"description": "Interface to RPI's PAGI World",
+	"license": "GPL-2.0",
+	"dependencies": {
+	},
+	"targetType": "executable",
+}
