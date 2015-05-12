@@ -4,6 +4,8 @@ D Language Interface to RPI's PAGI World
 
 ## Example usage
 
+	import pagi;
+
 	class TaskBot : pagi.Agent
 	{
 		this(in char[] host, ushort port)
