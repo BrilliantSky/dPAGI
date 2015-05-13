@@ -2,6 +2,20 @@
 D Language Interface to RPI's PAGI World
 (http://rair.cogsci.rpi.edu/projects/pagi-world/)
 
+Two classes are provided, a Connection for abstracting communication with PAGI World, and an Agent that can perform basic low-level actions. To use dPAGI, Agent should be subclassed.
+
+## Building dPAGI
+
+dPAGI can be build using dub, the D package system (http://code.dlang.org/getting_started)
+
+Execute the following commands after installing dub:
+
+	git clone https://github.com/BrilliantSky/dPAGI.git
+	cd dPAGI
+	dub build
+
+On Unix/Linux systems, libdpagi.a should be produced. Other software using dPAGI should link to this library.
+
 ## Example usage
 
 	import pagi;
