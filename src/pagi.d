@@ -28,7 +28,12 @@ float angleDiff(Degree a, Degree b)
 	return diff;
 }
 
-
+/// Handles low-level details for communication with PAGI World.
+///
+/// Handles receiving and transmitting messages. Only complete
+/// messages will be returned - message fragmentation is handled
+/// correctly in all cases.
+///
 class Connection
 {
 private:
@@ -37,23 +42,28 @@ private:
 	uint readOffset=0;
 
 public:
-	this(in char[] host, ushort port)
+	/// Construct the connection to the specified host and port
+	this(in char[] host, ushort port, uint timeout=100)
 	{
 		auto addr = new InternetAddress(host,port);
 		socket = new std.socket.TcpSocket(addr);
 		socket.blocking = true;
-		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, dur!"msecs"(100));
+		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.RCVTIMEO, dur!"msecs"(timeout));
 	}
 	~this()
 	{
 		socket.close();
 	}
 
+	/// Close the socket (will result in inability to receive or transmit)
 	void close()
 	{
 		socket.shutdown(SocketShutdown.BOTH);
 	}
 
+	/// Send a message to PAGI World
+	///
+	/// Does not append the required newline.
 	void send(in char[] msg)
 	{
 		auto bytes = socket.send(msg);
@@ -61,6 +71,9 @@ public:
 			throw new std.socket.SocketOSException("Send() failure");
 		assert( bytes == msg.length );
 	}
+	/// Receive messages from PAGI World
+	///
+	/// Separate messages are returned in an array and will never be fragmented. They will not contain a trailing newline.
 	const(char)[][] receive()
 	{
 		const(char)[][] lines;
@@ -68,13 +81,8 @@ public:
 		for(;;)
 		{
 			// Read data
-			//writefln("ReadOffset: %s", readOffset);
-			//if( readOffset >= buffer.length )
-			//	return lines;
 			enforce(readOffset < buffer.length, "Receive buffer not large enough");
 			auto bytes = socket.receive(buffer[readOffset..$]);
-			//if( bytes == 0 )
-			//	return lines;
 			if( bytes == socket.ERROR )
 			{
 				if( wouldHaveBlocked() )
@@ -82,7 +90,6 @@ public:
 				throw new std.socket.SocketOSException("Receive() failure");
 			}
 			enforce(bytes > 0, "PAGI World closed the connection");
-			//writefln("Rx %s bytes", bytes);
 			readOffset += bytes;
 
 			// Parse data
@@ -103,7 +110,6 @@ public:
 				tmpIdx = std.string.indexOf(buffer[0..readOffset], '\n', idx);
 				if( tmpIdx<0 ) // No newline - partial response read
 				{
-					//writefln("Done (%s,%s,%s)", idx, tmpIdx, readOffset);
 					// Shift back to start of buffer to make space for more data
 					for(int i=0; i<(readOffset-idx); i++)
 						buffer[i] = buffer[idx+i];
@@ -113,10 +119,7 @@ public:
 				}
 
 				// Read the line - WARNING: this is mutable!!
-				//writefln("Buffer (%s,%s)", idx, tmpIdx);
 				lines ~= buffer[idx..tmpIdx].dup;
-				//foreach(line; lines)
-				//	writefln("Line: '%s'", line);
 
 				idx = tmpIdx;
 			} while( true );
@@ -127,6 +130,10 @@ public:
 	}
 }
 
+/// Represents PAGI Guy.
+///
+/// This should be subclassed to provide specialized funcionality
+/// for the given task.
 class Agent
 {
 public:
@@ -140,6 +147,7 @@ public:
 	{
 		float posX=0, posY=0;
 	}
+	/// PAGI Guy's body
 	struct Body
 	{
 		Object self;
@@ -148,6 +156,7 @@ public:
 		float velX=0, velY=0;
 		float rot=0;
 	}
+	/// PAGI Guy's left or right hand
 	struct Hand
 	{
 		Object self;
@@ -155,30 +164,28 @@ public:
 		TactileSensor[5] sensors;
 	}
 protected:
-	Connection mConn;
-	/+float mPosX=0;
-	float mPosY=0;
-	float mVelX=0;
-	float mVelY=0;
-	float mRot=0;+/
-	Hand mLeftHand, mRightHand;
-	Body mBody;
+	Connection mConn;           /// Connection to PAGI World
+	Hand mLeftHand, mRightHand; /// Hand sensors
+	Body mBody;                 /// Body sensors
 
+	/// Used for timing update speeds to adjust forces. Longer delays
+	/// result in stronger forces to help keep constant velocity.
 	SysTime mLastUpdateTime;
+	/// Ditto
 	Duration mTimeDelta = Duration.zero;
 
-	enum DetailedVisionDims { width=31, height=21 };
-	enum PeripheralVisionDims { width=16, height=11 };
-	alias DetailedVisionArray = const(char)[][DetailedVisionDims.width][DetailedVisionDims.height];
-	alias PeripheralVisionArray = const(char)[][PeripheralVisionDims.width][PeripheralVisionDims.height];
+	enum DetailedVisionDims { width=31, height=21 }; /// Vision sizes
+	enum PeripheralVisionDims { width=16, height=11 }; /// Ditto
+	alias DetailedVisionArray = const(char)[][DetailedVisionDims.width][DetailedVisionDims.height]; /// Detailed vision array
+	alias PeripheralVisionArray = const(char)[][PeripheralVisionDims.width][PeripheralVisionDims.height]; /// Peripheral vision array
 
 protected:
-	enum TBEvent { LE,LX,RE,RX,BE,BX,RG,RR,LG,LL,OE,OX };
-	void triggerBoxEvent(in char[] box, TBEvent event) {};
-	void endorphinEvent(float amount, uint location) {};
-	void visionUpdateDetailed(in DetailedVisionArray sensors) {};
-	void visionUpdatePeripheral(in PeripheralVisionArray sensors) {};
-	void foundObject(in char[] object, in char[][] sensors) {};
+	enum TBEvent { LE,LX,RE,RX,BE,BX,RG,RR,LG,LL,OE,OX };  /// Trigger box event types
+	void triggerBoxEvent(in char[] box, TBEvent event) {}; /// Callback for trigger boxes
+	void endorphinEvent(float amount, uint location) {};   /// Callback for endorphins
+	void visionUpdateDetailed(in DetailedVisionArray sensors) {};     /// Callback for vision updates
+	void visionUpdatePeripheral(in PeripheralVisionArray sensors) {}; /// Callback for vision updates
+	void foundObject(in char[] object, in char[][] sensors) {};       /// Callback for object detection
 
 public:
 	this(Connection conn) {
@@ -188,6 +195,7 @@ public:
 			poll();
 	}
 
+	// Positional information
 	@property float pos_x() const { return mBody.posX; }
 	@property float pos_y() const { return mBody.posY; }
 	@property float vel_x() const { return mBody.velX; }
@@ -196,8 +204,9 @@ public:
 
 // High-level functions
 
-	// Rotate to position
+	/// Rotate to 0 degrees
 	void resetRotation() { setRotation(0); }
+	/// Rotate to position
 	void setRotation(Degree rot, Degree ep=4)
 	{
 		float diff = angleDiff(rot, toDegrees(this.rotation));
@@ -210,7 +219,7 @@ public:
 			writefln("Rotation: %s / %s (%s)", toDegrees(this.rotation), rot, diff);
 		}
 	}
-	// Stop moving (broken - body velocity is absolute, not relative like forces)
+	/// Stop moving (broken - body velocity is absolute, not relative like forces)
 	void stop()
 	{
 		while( abs(this.vel_x) > 1 )
@@ -221,6 +230,8 @@ public:
 	}
 
 // Low-level functions
+
+// Movement
 
 	void applyTorque(float torque)
 	{
@@ -255,6 +266,8 @@ public:
 			applyForce(vert, "RHV");
 		}
 	}
+
+// Gripping
 	void releaseGrip(bool left) { setGrip(left,false); }
 	void setGrip(bool left, bool enable=true)
 	{
@@ -265,12 +278,16 @@ public:
 			code = enable ? "RHG" : "RHR";
 		applyForce(1, code);
 	}
+
+// Apply generalized force
 	void applyForce(float force, in char[] code)
 	{
 		auto cmd = std.string.format("addForce,%s,%s\n", code, cast(int)force*mTimeDelta.total!"msecs"/1000);
 		//writefln("send: %s", cmd);
 		mConn.send(cmd);
 	}
+
+// Sensor requests - send when needed before poll() command
 
 	void requestBodySensorUpdate(uint n) { requestTactileSensorUpdate('B', n); }
 	void requestHandSensorUpdate(bool left, uint n) { requestTactileSensorUpdate(left ? 'L' : 'R', n); }
@@ -297,7 +314,7 @@ public:
 		mConn.send(cmd);
 	}
 
-
+// States & Reflexes (EXPERIMENTAL!)
 	void setReflex(in char[] name, in char[] cond, in char[] action)
 	{
 		auto actionstr = action;//join(";",actions);
@@ -319,6 +336,9 @@ public:
 		mConn.send( std.string.format("removeState,%s,0\n", name) );
 	}
 
+// misc.
+
+	/// Load a task in PAGI World.
 	void loadTask(in char[] name)
 	{
 		mConn.send( std.string.format("loadTask,%s\n", name) );
@@ -327,6 +347,9 @@ public:
 			poll();
 	}
 
+	/// Poll the connection for new data.
+	///
+	/// Returns false if no data is available.
 	bool poll()
 	{
 		// Update timer
@@ -335,10 +358,11 @@ public:
 		mLastUpdateTime = currTime;
 
 
-
+		// Always update body position, rotation, and velocity
 		mConn.send("sensorRequest,BP\n");
 		mConn.send("sensorRequest,S\n");
 		mConn.send("sensorRequest,A\n");
+
 		auto responses = mConn.receive();
 		//foreach( line; responses )
 		//	writefln("=====: '%s'", line);
@@ -355,29 +379,29 @@ public:
 
 			switch(tokens[0])
 			{
-			case "BP":
+			case "BP": // Body Position
 				enforce(tokens.length >= 3, "Too few tokens for BP: "~line);
 				mBody.posX = parse!float(tokens[1]);
 				mBody.posY = parse!float(tokens[2]);
 				break;
-			case "S":
+			case "S": // Body velocity
 				enforce(tokens.length >= 3, "Too few tokens for S: "~line);
 				mBody.velX = parse!float(tokens[1]);
 				mBody.velY = parse!float(tokens[2]);
 				break;
-			case "A":
+			case "A": // Body Rotation
 				enforce(tokens.length >= 2, "Too few tokens for A: "~line);
 				mBody.rot = parse!float(tokens[1]) % (std.math.PI*2);
 				break;
-			case "TB":
+			case "TB": // Trigger Box
 				enforce(tokens.length >=3, "Too few tokens for TB: "~line);
 				triggerBoxEvent( tokens[1], parse!TBEvent(tokens[2]) );
 				break;
-			case "RD":
+			case "RD": // Endorphins
 				enforce(tokens.length >=3, "Too few tokens for RD: "~line);
 				endorphinEvent(parse!float(tokens[1]), parse!uint(tokens[2]));
 				break;
-			case "L0":
+			case "L0": // Hand and body positions
 			case "L1":
 			case "L2":
 			case "L3":
@@ -399,9 +423,9 @@ public:
 				TactileSensor *sensor;
 				final switch( tokens[0][0] )
 				{
-				case 'L': sensor = &mLeftHand.sensors[tokens[0][1]-'0']; break;
-				case 'R': sensor = &mRightHand.sensors[tokens[0][1]-'0']; break;
-				case 'B': sensor = &mBody.sensors[tokens[0][1]-'0']; break;
+				case 'L': sensor = &mLeftHand.sensors[tokens[0][1]-'0']; break; // Left hand
+				case 'R': sensor = &mRightHand.sensors[tokens[0][1]-'0']; break; // Right hand
+				case 'B': sensor = &mBody.sensors[tokens[0][1]-'0']; break; // Body
 				}
 				sensor.p = (tokens[1] == "1");
 				sensor.temp = parse!float(tokens[2]);
@@ -410,14 +434,14 @@ public:
 				sensor.tx[2] = parse!float(tokens[5]);
 				sensor.tx[3] = parse!float(tokens[6]);
 				break;
-			case "LP":
+			case "LP": // Left and right hand proprioception
 			case "RP":
 				enforce(tokens.length >= 3, "Too few tokens for LP/RP: "~line);
 				Hand *sensor = tokens[0][0]=='L' ? &mLeftHand : &mRightHand;
 				sensor.posX = parse!float(tokens[1]);
 				sensor.posY = parse!float(tokens[2]);
 				break;
-			case "findObj":
+			case "findObj": // Find object
 				enforce(tokens.length >= 2, "Too few tokens for findObj: "~line);
 				//uint[] locations;
 				//locations.length = tokens.length-2;
@@ -425,7 +449,7 @@ public:
 				//	locations[i] = to!
 				foundObject(tokens[1], tokens[2..$]);
 				break;
-			case "MDN":
+			case "MDN": // Detailed vision update
 				enforce(tokens.length >= 1+DetailedVisionDims.width*DetailedVisionDims.height);
 				DetailedVisionArray sensors;
 				for(uint y=0; y<DetailedVisionDims.height; y++)
@@ -433,7 +457,7 @@ public:
 						sensors[y][x] = tokens[1+y*DetailedVisionDims.width+x];
 				visionUpdateDetailed(sensors);
 				break;
-			case "MPN":
+			case "MPN": // Peripheral vision update
 				enforce(tokens.length >= 1+PeripheralVisionDims.width*PeripheralVisionDims.height);
 				PeripheralVisionArray sensors;
 				for(uint y=0; y<PeripheralVisionDims.height; y++)
@@ -444,8 +468,8 @@ public:
 					}
 				visionUpdatePeripheral(sensors);
 				break;
-			case "":
-			default:
+			case "": // Nothing?
+			default: // Unknown
 				break;
 			}
 		}
@@ -454,6 +478,8 @@ public:
 	}
 }
 
+version(unittest)
+{
 
 class TestAgent : Agent
 {
@@ -487,11 +513,13 @@ class TestAgent : Agent
 	}
 }
 
-
+/+
 void setRotationTarget(Agent guy, float rotation, float epsilon=10)
 {
 	guy.setReflex("rotateL", "A|>|"~to!string(rotation+epsilon), "addForce|BR|1");
 	guy.setReflex("rotateR", "A|<|"~to!string(rotation-epsilon), "addForce|BR|-1");
+}
++/
 }
 
 /+
